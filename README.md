@@ -2,7 +2,7 @@
 
 > **Work in progress**
 
-A portfolio project focused on practicing the design and implementation of an **ELT pipeline** that extracts public data, stages it in cloud storage, and loads it into a cloud data warehouse for analytical use.
+A portfolio project focused on practicing the design and implementation of an ETL pipeline using Python and Pandas to extract, transform, and load public datasets into Google BigQuery for analytical purposes.
 
 ## Project Overview
 
