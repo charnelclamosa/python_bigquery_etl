@@ -23,25 +23,15 @@ entity "dim_location" as dim_location {
   * **location_key** : INT <<PK>>
   --
   incident_zip : VARCHAR
-  intersection_street_1 : VARCHAR
-  intersection_street_2 : VARCHAR
+  incident_address : VARCHAR
+  street_name : VARCHAR
   address_type : VARCHAR
+  landmark : VARCHAR
   city : VARCHAR
-  community_board : VARCHAR
   police_precinct : VARCHAR
   borough : VARCHAR
   latitude : DECIMAL
   longitude : DECIMAL
-  x_coordinate_state_plane : VARCHAR
-  y_coordinate_state_plane : VARCHAR
-}
-
-entity "dim_facility" as dim_facility {
-  * **facility_key** : INT <<PK>>
-  --
-  facility_type : VARCHAR
-  park_facility_name : VARCHAR
-  park_borough : VARCHAR
 }
 
 entity "dim_status" as dim_status {
@@ -74,7 +64,6 @@ entity "fact_complaints" as fact_complaints {
   * agency_key : INT <<FK>>
   * complaint_type_key : INT <<FK>>
   * location_key : INT <<FK>>
-  * facility_key : INT <<FK>>
   * status_key : INT <<FK>>
   * resolution_key : INT <<FK>>
   * date_key : INT <<FK>>
@@ -89,27 +78,18 @@ entity "fact_complaints" as fact_complaints {
 dim_agency ||--o{ fact_complaints
 dim_complaint_type ||--o{ fact_complaints
 dim_location ||--o{ fact_complaints
-dim_facility ||--o{ fact_complaints
 dim_status ||--o{ fact_complaints
 dim_resolution ||--o{ fact_complaints
 dim_date ||--o{ fact_complaints
 
 ' Layout hints
-
-' Top
-dim_agency -[hidden]up- fact_complaints
+dim_agency -[hidden]down- fact_complaints
 dim_date -[hidden]up- fact_complaints
-
-' Left and right
 dim_complaint_type -[hidden]left- fact_complaints
 dim_location -[hidden]right- fact_complaints
-
-' Bottom
-fact_complaints -[hidden]down- dim_facility
-
-' Additional positioning
-dim_status -[hidden]left- dim_facility
-dim_resolution -[hidden]right- dim_facility
+fact_complaints -[hidden]down- fact_complaints
+dim_status -[hidden]up- fact_complaints
+dim_resolution -[hidden]down- fact_complaints
 
 
 @enduml

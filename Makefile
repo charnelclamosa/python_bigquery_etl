@@ -11,7 +11,10 @@ build:
 	docker build -t $(PROJECT_NAME) .
 
 run:
-	docker run -d --name $(CONTAINER_NAME) -p $(API_PORT):8080 $(PROJECT_NAME)
+	docker run -d --name $(CONTAINER_NAME) \
+		-p $(API_PORT):8080 \
+		-u "$(shell id -u):$(shell id -g)" \
+		-v "$(PWD):/app" $(PROJECT_NAME)
 
 stop:
 	docker stop $(CONTAINER_NAME)
