@@ -4,6 +4,8 @@ import time
 from contextlib import closing
 from datetime import datetime
 from typing import Iterator
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 from sodapy import Socrata
 from src.logging_config import configure_logging
@@ -65,11 +67,23 @@ def init_client():
   client : Socrata()
     Initialized connection.
   """
+  retry = Retry(
+    total=5,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+  )
+  
   client = Socrata(
     "data.cityofnewyork.us", 
     os.getenv("NYC_OPEN_DATA_TOKEN"), 
     username=os.getenv("NYC_OPEN_DATA_EMAIL"), 
-    password=os.getenv("NYC_OPEN_DATA_PASSWORD"))
+    password=os.getenv("NYC_OPEN_DATA_PASSWORD"),
+    timeout=30,
+    session_adapter={
+      "prefix": "https://",
+      "adapter": HTTPAdapter(max_retries=retry),
+    })
 
   return client
 

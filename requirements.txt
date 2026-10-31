@@ -8,3 +8,4 @@ pytest==9.2.0
 google-cloud-bigquery==3.46.2
 google-cloud-storage==3.17.1
 sodapy
+urllib3
