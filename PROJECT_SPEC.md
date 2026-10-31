@@ -1,211 +1,510 @@
-# NYC 311 ETL Pipeline to BigQuery: Lean Project Spec
+from pathlib import Path
+import pypandoc
 
-Version 2.1 | Personal side project | Python transforms, deployed as a Cloud Run Job, BigQuery as the warehouse destination
+markdown = r"""# NYC 311 ETL Pipeline to BigQuery — Project Specification
 
-## 1. Project Context
+> **Status:** Work in progress  
+> **Purpose:** Personal portfolio project for practicing Python-based ETL, dimensional modeling, and loading data into Google BigQuery.
 
-This is a small ETL pipeline built to practice ETL skills and get hands-on data warehouse exposure while spending close to $0 of the $300 GCP credits. Data is extracted from a public API, transformed in **Python (pandas)**, and loaded into **BigQuery**, which acts only as the storage and serving layer. The pipeline is developed locally, then packaged as a Docker image in **Artifact Registry** and run automatically on GCP as a **Cloud Run Job** triggered by **Cloud Scheduler**.
+## 1. Project Overview
 
-**Dataset:** NYC 311 Service Requests (NYC Open Data, Socrata SODA API). It is free, updates daily, and is messy enough (inconsistent categories, bad ZIPs, null coordinates, records that change status) to make the transformation work worthwhile. Any other public API can be swapped in; only the extract and clean steps change.
+This project builds a batch ETL pipeline using the NYC 311 Service Requests dataset from NYC Open Data.
 
-**Learning goals**
+The pipeline will:
 
-- Build an extract, transform, load flow with incremental extraction
-- Practice cleaning, deduplication, and dimensional modeling in pandas
-- Design a layered warehouse (raw, staging, marts) with partitioned and clustered tables in BigQuery
-- Containerize the pipeline and run it unattended on a schedule in GCP
-- Add data quality checks and unit tests
+1. **Extract** service-request records from the Socrata API using Python and `sodapy`.
+2. **Transform** the extracted records using Python and Pandas.
+3. **Load** the transformed data into Google BigQuery for analytical querying.
 
-## 2. Design Principles
+Parquet will be used as the intermediate file format. Google Cloud Storage (GCS) will provide cloud-based file staging.
 
-- **Serverless batch.** A Cloud Run Job runs to completion and exits; Cloud Scheduler triggers it daily. No always-on infrastructure, and no Composer, GKE, or VMs.
-- **Transform in Python, load to BigQuery.** Transforms read raw files from storage, not from BigQuery, so they use no query quota.
-- **One container, two environments.** The same image runs locally and in the cloud; a config setting switches the storage path between a local `data/` folder and a `gs://` bucket.
-- **State lives outside the container.** Cloud Run's filesystem is temporary, so all raw files and state are kept in Cloud Storage and BigQuery.
-- **Keep data small.** Load roughly the last 6 months (about 1 to 1.5M rows).
-- **Use free operations.** BigQuery load jobs are free; storage is free up to 10 GB; queries are free up to 1 TB per month.
-- **Full rebuild over clever incremental.** Only the extract is incremental; staging and marts are rebuilt each run.
+The project is being developed locally first, then will be containerized with Docker and deployed as a Google Cloud Run Job triggered by Cloud Scheduler.
+
+## 2. Learning Objectives
+
+- Build a paginated, incremental data extraction process.
+- Implement data cleaning, validation, deduplication, and transformation with Pandas.
+- Design and populate a dimensional model using a star schema.
+- Write transformed data to Parquet.
+- Stage files in Google Cloud Storage and load them into BigQuery.
+- Containerize the pipeline and run it as a scheduled batch job.
+- Add logging, retry handling, data quality checks, and tests.
 
 ## 3. Data Source
 
-- **Endpoint:** `https://data.cityofnewyork.us/resource/erm2-nwe9.json` (verify the dataset ID on the portal)
-- **Query params:** `$select`, `$where`, `$order`, `$limit`, `$offset`
-- **Auth:** free app token in the `X-App-Token` header (optional, avoids throttling)
-- **Columns to pull:** `unique_key`, `created_date`, `closed_date`, `agency`, `complaint_type`, `descriptor`, `borough`, `incident_zip`, `latitude`, `longitude`, `status`, `open_data_channel_type`
-- **Quirks to handle:** placeholder boroughs, invalid ZIPs, null or zero coordinates, `closed_date` before `created_date`, inconsistent complaint text, status changes after first load
+| Item | Details |
+|---|---|
+| Dataset | NYC 311 Service Requests |
+| Provider | NYC Open Data / Socrata |
+| Dataset ID | `erm2-nwe9` |
+| SODA 2 endpoint | `https://data.cityofnewyork.us/resource/erm2-nwe9.json` |
+| Python client | `sodapy.Socrata` |
+| Authentication | Socrata app token; credentials supplied through environment variables |
+
+The extraction implementation currently uses the Socrata SODA 2 interface through `sodapy`. It uses `select`, `where`, `order`, `limit`, and `offset` parameters.
+
+### Source fields
+
+The extraction currently requests fields needed for the fact table and dimensions:
+
+| Source field | Intended use |
+|---|---|
+| `unique_key` | Source-system complaint identifier |
+| `agency`, `agency_name` | `dim_agency` |
+| `complaint_type`, `descriptor` | `dim_complaint_type` |
+| `incident_zip`, `incident_address`, `street_name`, `address_type`, `landmark`, `city`, `police_precinct`, `borough`, `latitude`, `longitude` | `dim_location` |
+| `status` | `dim_status` |
+| `resolution_description` | `dim_resolution` |
+| `created_date` | Complaint creation timestamp and creation-date dimension reference |
+| `resolution_action_updated_date` | Resolution/action timestamp and resolution-date dimension reference |
+
+**Scope decision:** Facility attributes (`facility_type`, `park_facility_name`, and `park_borough`) are excluded from the current dimensional model because they are frequently null or not applicable. They should also be removed from the extraction column list unless the project scope changes.
+
+`resolution_action_updated_date` represents the date/time of the latest resolution-related action update. It should not automatically be interpreted as a definitive closure timestamp. The project will retain this source meaning in its documentation and analysis.
 
 ## 4. Architecture
 
-```
-Cloud Scheduler (daily)
-        |
-        v
-Cloud Run Job  (image pulled from Artifact Registry)
-        |
-  extract.py --> gs://<bucket>/raw/<date>.parquet   (immutable)
-        |                        |
-        |               BigQuery load job --> raw_311.service_requests
-        v
-  transform.py (pandas, reads raw files from GCS)
-  clean, dedupe, model
-        |
-  gs://<bucket>/staging/stg.parquet
-        |
-  BigQuery load jobs --> stg_311.service_requests
-                         mart_311.dim_* + fact_service_request + agg_*
+### Planned end-to-end flow
+
+```text
+                 NYC 311 Socrata API
+                          |
+                          v
+                 Extract (sodapy)
+                          |
+                          v
+               Raw records / Pandas
+                          |
+                          v
+             Transform and validate
+                       (Pandas)
+                          |
+                          v
+                    Parquet files
+                          |
+                          v
+               Google Cloud Storage
+                          |
+                          v
+                BigQuery load jobs
+                          |
+                          v
+              BigQuery warehouse tables
+                 (star schema)
 ```
 
-**Deployment flow:** `docker build` the image, push it to Artifact Registry, deploy or update the Cloud Run Job to use it, and let Cloud Scheduler trigger it.
+### Planned GCP execution flow
+
+```text
+Cloud Scheduler
+      |
+      v
+Cloud Run Job
+      |
+      v
+Docker image from Artifact Registry
+      |
+      v
+Run the Python ETL pipeline
+      |
+      +--> Socrata API
+      |
+      +--> Google Cloud Storage
+      |
+      +--> BigQuery
+```
+
+BigQuery is the warehouse and analytical serving layer. Data cleaning and dimensional transformations are performed in Python/Pandas rather than relying on BigQuery SQL for the primary transformation process.
 
 ## 5. Technology Stack
 
-| Concern | Choice |
+| Area | Technology |
 |---|---|
-| Language | Python 3.11+ |
-| Libraries | `requests`, `pandas`, `pyarrow`, `google-cloud-bigquery`, `google-cloud-storage`, `pytest` |
-| Warehouse | BigQuery with 3 datasets: `raw_311`, `stg_311`, `mart_311` |
-| File storage | Cloud Storage bucket (`raw/`, `staging/`); local `data/` folder during development |
-| Packaging | Docker image on a slim Python base |
-| Image registry | Artifact Registry (Docker repository) |
-| Compute | Cloud Run Job |
-| Scheduling | Cloud Scheduler (one daily job) |
-| Auth | Dedicated service account attached to the job; no key file in the cloud |
-| Secrets | Secret Manager, or an environment variable at first, for the Socrata app token |
-| Logging | Structured JSON logs to stdout (Cloud Logging) |
+| Language | Python |
+| API client | `sodapy` |
+| Data processing | Pandas |
+| Intermediate format | Parquet / PyArrow |
+| HTTP retry support | `requests`, `urllib3` |
+| Local API / development interface | FastAPI |
+| Containerization | Docker |
+| Cloud file storage | Google Cloud Storage |
+| Data warehouse | Google BigQuery |
+| Container registry | Artifact Registry |
+| Batch execution | Cloud Run Jobs |
+| Scheduling | Cloud Scheduler |
+| Logging | Python `logging`, Cloud Logging |
+| Testing | pytest (planned) |
 
-## 6. Functional Requirements
+## 6. Extraction Design
 
-**Extract**
+### Current implementation
 
-- FR-1: Fetch records for a date range with paginated requests and a stable `$order`.
-- FR-2: Incremental mode pulls from the latest stored `created_date` minus a 14-day lookback to catch status changes. The latest stored date is read from the files in the bucket.
-- FR-3: Retry failed requests with exponential backoff.
-- FR-4: Save each pull to a dated Parquet file in the bucket (local folder in development) that is never modified afterward.
+The extraction module is `src/extract.py`.
 
-**Load raw**
+It currently includes:
 
-- FR-5: Load each raw file into `raw_311.service_requests` with a load job, adding `_ingested_at` and `_batch_id` columns.
+- A `sodapy.Socrata` client configured with credentials from environment variables.
+- HTTP request retries for selected transient HTTP errors, with a maximum of five retries and exponential backoff.
+- A request timeout of 30 seconds.
+- A configurable page size, currently set to 10,000 records.
+- A date-window query using `created_date >= start AND created_date < end`.
+- Deterministic ordering by `created_date ASC, unique_key ASC`.
+- Offset-based pagination.
+- Duplicate removal using `unique_key`.
+- Conversion of extracted rows to records with missing values represented as `None`.
+- A watermark returned by the extraction function for the caller to persist after a successful load.
 
-**Transform (Python)**
+### Incremental extraction
 
-- FR-6: Clean: cast types, trim and standardize text, set invalid ZIPs and out-of-range coordinates to null.
-- FR-7: Deduplicate: combine all raw files and keep the latest version of each `unique_key`.
-- FR-8: Derive `resolution_hours`, `is_closed`, `date_key`, and a `dq_flags` column. Flag bad rows; do not drop them.
-- FR-9: Build dimensions `dim_date`, `dim_agency`, `dim_complaint_type`, and `dim_location` (borough, ZIP) with integer surrogate keys.
-- FR-10: Build `fact_service_request` by joining staging to the dimensions.
-- FR-11: Build one aggregate table: daily request counts by borough and complaint type.
+The extraction window is defined as:
 
-**Load warehouse**
+- `start`: inclusive lower bound, defaulting to the saved watermark.
+- `end`: exclusive upper bound, defaulting to the current timestamp.
 
-- FR-12: Load staging, dimensions, fact, and aggregate into BigQuery with `WRITE_TRUNCATE`. The fact table is partitioned by `created_at` date and clustered by `agency_key`.
-- FR-13: Reruns must leave identical row counts, since the same raw files always produce the same tables.
+The extraction function returns both the extracted records and the proposed new watermark. The watermark must only be committed after the corresponding data has been successfully written to durable storage and loaded as required by the pipeline.
 
-**Deployment and automation**
+The current approach uses `created_date` as the extraction watermark. This captures newly created complaints, but it does not by itself detect changes to older complaints. A future enhancement may use a lookback window and deduplication/upsert logic to re-fetch recent records. The limitations of `created_date` as a change-tracking field should be documented.
 
-- FR-14: Package the pipeline as one Docker image whose entrypoint runs the full flow (`cli.py all`).
-- FR-15: Push the image to Artifact Registry in the same region as the job.
-- FR-16: Run the Cloud Run Job under a dedicated service account with least-privilege roles (BigQuery Data Editor, BigQuery Job User, and object access on the bucket only).
-- FR-17: Set a low max-retries count and a task timeout on the job so a stuck run cannot keep billing.
-- FR-18: Trigger the job once a day with Cloud Scheduler at an off-peak time.
-- FR-19: Exit with a non-zero code on any critical failure so Cloud Run marks the execution as failed, and write structured logs with a run ID.
+### Pagination
 
-## 7. Data Model
+The implementation uses SODA 2 offset pagination:
 
-`fact_service_request` is partitioned by `DATE(created_at)` and clustered by `agency_key`.
+- `limit`: maximum number of records per request.
+- `offset`: number of records to skip.
 
-| Column | Type |
+Pages are ordered by `created_date` and `unique_key` to provide deterministic ordering. The extraction loop stops when a page contains fewer records than the configured page size.
+
+The current implementation collects all pages into memory before returning the result. If the extraction volume becomes too large, consider processing and writing each page as a separate Parquet batch rather than accumulating the entire extraction window in memory.
+
+### Current extraction progress
+
+| Capability | Status |
 |---|---|
-| `request_id` | STRING |
-| `created_at`, `closed_at` | TIMESTAMP |
-| `date_key`, `agency_key`, `complaint_type_key`, `location_key` | INT64 |
-| `status` | STRING |
-| `resolution_hours` | FLOAT64 |
-| `dq_flags` | STRING (comma-joined) |
+| Socrata client initialization | Implemented |
+| Environment-based credentials | Implemented |
+| Retry configuration and request timeout | Implemented |
+| Date-window filtering | Implemented |
+| Ordered, offset-based pagination | Implemented |
+| Duplicate removal by `unique_key` | Implemented |
+| Missing-value conversion | Implemented through utility function |
+| Watermark retrieval and return | Implemented through utility functions |
+| Durable raw Parquet output | Planned |
+| GCS upload | Planned |
+| BigQuery loading | Planned |
 
-Dimensions use integer surrogate keys. Because dimensions and fact are rebuilt together each run, keys stay consistent without extra bookkeeping.
+## 7. Dimensional Data Model
 
-## 8. Data Quality Checks
+The warehouse will use a **star schema** with one fact table and the following dimensions:
 
-Checks run in pandas before the warehouse load. Critical failures stop the run before anything is loaded.
+- `dim_agency`
+- `dim_complaint_type`
+- `dim_location`
+- `dim_status`
+- `dim_resolution`
+- `dim_date`
 
-| Check | Severity |
+`dim_facility` is intentionally excluded from the current model.
+
+### Fact table: `fact_complaints`
+
+**Grain:** One row per unique NYC 311 complaint.
+
+| Column | Description |
 |---|---|
-| `unique_key` is unique in staging | Critical |
-| `unique_key` and `created_date` are not null | Critical |
-| Every fact foreign key exists in its dimension | Critical |
-| `closed_date >= created_date` where both exist | Warning (flag row) |
-| Latest `created_date` is within 2 days of today | Warning |
-| BigQuery table row counts match the DataFrames after load | Critical |
+| `complaint_key` | Warehouse-generated surrogate primary key |
+| `complaint_id` | Source `unique_key`; natural/business identifier |
+| `agency_key` | FK to `dim_agency` |
+| `complaint_type_key` | FK to `dim_complaint_type` |
+| `location_key` | FK to `dim_location` |
+| `status_key` | FK to `dim_status` |
+| `resolution_key` | FK to `dim_resolution` |
+| `date_key` | FK to `dim_date` for the complaint creation date |
+| `resolution_date_key` | FK to `dim_date` for the resolution/action update date |
+| `created_date` | Original source creation timestamp |
+| `resolution_action_updated_date` | Original source resolution/action update timestamp |
+| `complaint_count` | Additive measure, set to `1` for each complaint |
 
-## 9. Cost Guardrails
+The two date foreign keys reference the same `dim_date` table in different roles: creation date and resolution/action update date.
 
-1. Create a **budget alert** at $10 and $25 in the GCP console before anything else.
-2. Set `maximum_bytes_billed` (for example 1 GB) on every query job run from Python.
-3. Partition the fact table and set `require_partition_filter = true`.
-4. Never run `SELECT *` on wide tables; check the dry-run estimate first.
-5. Put the bucket, Cloud Run Job, Artifact Registry repo, and BigQuery datasets in one region. Use a US region such as us-central1 so the bucket qualifies for the Cloud Storage free tier.
-6. Keep the job small (1 vCPU, 1 GiB memory or less), with a timeout and 1 to 2 retries at most.
-7. Keep the Docker image slim, and delete old image versions in Artifact Registry to stay near its free storage allowance.
-8. Add a lifecycle rule on the bucket and drop test tables when done.
-9. Read raw files from the bucket for transforms; do not pull large tables back out of BigQuery.
+### Dimension tables
 
-## 10. Repository Structure
+#### `dim_agency`
 
+| Column | Description |
+|---|---|
+| `agency_key` | Surrogate primary key |
+| `agency_id` | Source agency identifier (`agency`) |
+| `agency_name` | Agency name |
+
+#### `dim_complaint_type`
+
+| Column | Description |
+|---|---|
+| `complaint_type_key` | Surrogate primary key |
+| `complaint_type` | Complaint category |
+| `descriptor` | More specific complaint description |
+
+#### `dim_location`
+
+| Column | Description |
+|---|---|
+| `location_key` | Surrogate primary key |
+| `incident_zip` | Incident ZIP code |
+| `incident_address` | Incident address |
+| `street_name` | Street name |
+| `address_type` | Address type |
+| `landmark` | Nearby landmark |
+| `city` | City |
+| `police_precinct` | Police precinct |
+| `borough` | NYC borough |
+| `latitude` | Latitude |
+| `longitude` | Longitude |
+
+#### `dim_status`
+
+| Column | Description |
+|---|---|
+| `status_key` | Surrogate primary key |
+| `status` | Current complaint status in the source record |
+
+#### `dim_resolution`
+
+| Column | Description |
+|---|---|
+| `resolution_key` | Surrogate primary key |
+| `resolution_description` | Source resolution/action description |
+
+The resolution description may contain verbose or high-cardinality text. During transformation, assess its distinct-value count and consistency. If it does not form a useful reusable dimension, consider retaining it as a descriptive fact attribute or grouping it into meaningful categories.
+
+#### `dim_date`
+
+| Column | Description |
+|---|---|
+| `date_key` | Date key, preferably integer `YYYYMMDD` |
+| `full_date` | Calendar date |
+| `day` | Day of month |
+| `month` | Month number |
+| `month_name` | Month name |
+| `quarter` | Calendar quarter |
+| `year` | Calendar year |
+| `day_of_week` | Day of week |
+
+The date dimension contains calendar attributes, not hour/minute-level rows. Original source timestamps remain in the fact table so time-of-day analysis remains possible.
+
+### Modeling notes
+
+- Dimension keys are warehouse-generated surrogate keys.
+- `complaint_id` preserves the source `unique_key` and identifies the complaint across pipeline runs.
+- `complaint_count` is a derived measure equal to `1` per fact row.
+- The current fact design represents the complaint's latest available state, not a full history of every status change.
+- If status history becomes a requirement, add a separate status-event or periodic-snapshot fact rather than treating the current fact as historical status tracking.
+- Since the current design rebuilds dimensions and facts together, surrogate keys can be regenerated consistently within each full rebuild. If incremental dimension maintenance is introduced, key persistence and change handling must be designed explicitly.
+
+## 8. Transformation Requirements
+
+Transformations will be implemented in Python/Pandas.
+
+Planned processing includes:
+
+1. Normalize column names and text values.
+2. Convert source fields to appropriate data types.
+3. Handle missing values consistently.
+4. Validate ZIP codes and geographic coordinates.
+5. Deduplicate records using `unique_key`.
+6. Parse source timestamps and derive calendar dates.
+7. Build unique dimension datasets.
+8. Generate surrogate keys for dimensions.
+9. Map dimension keys back to complaint records.
+10. Build the fact table at one row per complaint.
+11. Run data quality checks before loading.
+
+The original timestamp values should be retained in the fact table even when date keys are derived for dimensional analysis.
+
+## 9. Loading Design
+
+The planned load flow is:
+
+1. Write extracted or transformed batches to Parquet.
+2. Upload Parquet files to a Google Cloud Storage bucket.
+3. Load the transformed datasets into BigQuery using BigQuery load jobs.
+4. Populate the dimension and fact tables.
+
+A possible GCS layout:
+
+```text
+gs://<bucket>/
+    raw/
+        service_requests_<batch-id>.parquet
+    transformed/
+        dim_agency.parquet
+        dim_complaint_type.parquet
+        dim_location.parquet
+        dim_status.parquet
+        dim_resolution.parquet
+        dim_date.parquet
+        fact_complaints.parquet
 ```
-nyc311-etl/
-  README.md
-  requirements.txt
-  Dockerfile
-  .dockerignore
-  config.yaml          # project id, region, dataset names, bucket, lookback days
-  etl/
-    extract.py         # Socrata client, pagination, retries
-    storage.py         # local folder or gs:// read/write helpers
-    load.py            # BigQuery load helpers
-    transform.py       # clean, dedupe, derive
-    model.py           # build dims, fact, aggregate
-    quality.py         # pandas data quality checks
-    cli.py             # extract | load-raw | transform | load-dw | all
-  deploy/
-    deploy.sh          # build, push, deploy job, create scheduler trigger
-  tests/
-    test_transform.py
-    test_model.py
-    test_quality.py
-    fixtures/          # small sample API payload
-  data/                # gitignored: local raw/ and staging/ for development
+
+A possible BigQuery layout:
+
+```text
+BigQuery project
+└── nyc_311
+    ├── staging
+    │   └── stg_service_requests
+    └── warehouse
+        ├── dim_agency
+        ├── dim_complaint_type
+        ├── dim_location
+        ├── dim_status
+        ├── dim_resolution
+        ├── dim_date
+        └── fact_complaints
 ```
 
-## 11. Milestones
+The exact dataset and table names may be adjusted during implementation. Staging and warehouse tables should remain logically separated.
 
-| # | Milestone | Done when |
-|---|---|---|
-| 1 | GCP setup | Project, budget alerts, service account, bucket, Artifact Registry repo, 3 datasets exist |
-| 2 | Extract | One month of data saved from the API (local folder first) |
-| 3 | Raw load | `raw_311` populated via load job |
-| 4 | Transform | Cleaning, dedupe, dims, fact, aggregate built in pandas with unit tests |
-| 5 | Warehouse load and checks | Tables loaded to BigQuery locally, checks pass |
-| 6 | Containerize | Image builds, runs locally, and is pushed to Artifact Registry |
-| 7 | Deploy | Cloud Run Job runs end to end when started manually, reading and writing the bucket |
-| 8 | Automate | Cloud Scheduler triggers the job daily; README written |
+## 10. Data Quality and Reliability
 
-## 12. Acceptance Criteria
+Planned checks include:
 
-1. 6 months of data are loaded into all three layers.
-2. Rerunning the pipeline leaves BigQuery row counts unchanged.
-3. All critical checks pass, and unit tests pass for the transform, model, and quality modules.
-4. The scheduled Cloud Run Job runs unattended for 7 consecutive days with successful executions and no duplicate rows.
-5. At least 3 analytical SQL queries run on the marts (top complaint types per borough, median resolution time by agency, weekly trend).
-6. Total GCP spend stays under about $5.
+| Check | Expected behavior |
+|---|---|
+| `unique_key` is not null | Critical failure if violated |
+| `unique_key` is unique in the final fact | Critical failure if violated |
+| Required timestamps parse correctly | Invalid values are flagged or rejected according to policy |
+| Latitude and longitude are within valid ranges | Invalid values are set to null and flagged |
+| Dimension natural attributes are deduplicated | No duplicate dimension members |
+| Every fact foreign key resolves to a dimension row | Critical failure if violated |
+| Resolution/action update timestamp is not earlier than creation timestamp | Flag suspicious records for review |
+| Loaded row counts match transformed row counts | Critical failure if violated |
 
-## 13. Optional Later
+Failures should be logged with enough context to diagnose the affected batch. The pipeline should not advance its watermark when extraction, transformation, or loading fails.
 
-- Alert on failed job executions with Cloud Monitoring
-- Add CI/CD that builds and pushes the image on every merge (Cloud Build or GitHub Actions)
-- Learn `MERGE` by loading changed rows to a temp table and upserting into staging
-- Add a Looker Studio dashboard on the marts
-- Add a second source (for example weather) and join it to 311 volume
+## 11. API and Local Development Interface
 
-## 14. Out of Scope
+The current `src/server.py` exposes a small FastAPI interface:
 
-Streaming, orchestration platforms (Airflow, Composer), GKE or VM hosting, multi-environment setup, and slowly changing dimensions.
+| Route | Purpose |
+|---|---|
+| `GET /api/healthz` | Health check |
+| `GET /api/etl/extract` | Development endpoint that invokes extraction |
+
+FastAPI is currently used as a local development/testing interface. It is not the ETL execution mechanism planned for Cloud Run Jobs. The deployed job should execute the pipeline as a process, run to completion, and exit with an appropriate status code.
+
+**Important implementation requirement:** The current extraction endpoint saves the watermark after extraction and returns a `loaded` count, but it does not yet perform a durable file or BigQuery load. Before using this endpoint in the complete pipeline, move watermark persistence until after successful loading, and report `loaded` only when records have actually been loaded.
+
+## 12. Deployment and Scheduling
+
+Planned GCP deployment:
+
+- Build the ETL Docker image.
+- Push the image to Artifact Registry.
+- Configure a Cloud Run Job to execute the ETL entry point.
+- Configure Cloud Scheduler to trigger the job on a daily schedule.
+- Use a dedicated service account with least-privilege access to GCS and BigQuery.
+- Store API credentials in environment configuration or Secret Manager.
+- Write logs to stdout/stderr so Cloud Logging can collect them.
+- Return a non-zero process exit code for critical failures.
+
+Cloud Run Jobs are intended for the scheduled batch pipeline. The FastAPI development server should not be required for the job to execute.
+
+## 13. Cost Considerations
+
+The project aims to stay within the available GCP credits and keep ongoing costs low.
+
+Cost-conscious practices:
+
+- Use batch processing rather than streaming.
+- Use Parquet to reduce intermediate storage size.
+- Keep the initial extraction window limited while developing.
+- Use BigQuery load jobs rather than repeatedly inserting rows individually.
+- Avoid unnecessary full-table scans and `SELECT *` queries.
+- Consider partitioning the fact table by complaint creation date.
+- Keep Cloud Run Job CPU, memory, timeout, and retry settings modest.
+- Configure a GCP budget alert before running the cloud pipeline regularly.
+
+Exact free-tier eligibility and pricing depend on current GCP terms, region, and usage; verify costs in the Google Cloud console.
+
+## 14. Repository Structure
+
+The repository is evolving. The current code includes `src/extract.py`, `src/server.py`, `src/logging_config.py`, and utility functions. The following is a target structure, not a statement that every module already exists.
+
+```text
+nyc-311-etl/
+├── README.md
+├── PROJECT_SPEC.md
+├── requirements.txt
+├── Dockerfile
+├── Makefile
+├── src/
+│   ├── __init__.py
+│   ├── extract.py
+│   ├── transform.py
+│   ├── model.py
+│   ├── load.py
+│   ├── storage.py
+│   ├── quality.py
+│   ├── server.py
+│   ├── logging_config.py
+│   └── utils.py
+├── tests/
+│   ├── test_extract.py
+│   ├── test_transform.py
+│   ├── test_model.py
+│   └── test_quality.py
+├── docs/
+│   └── data_model.puml
+└── data/                  # Local development data; gitignored
+```
+
+## 15. Milestones
+
+| # | Milestone | Completion criteria | Status |
+|---|---|---|---|
+| 1 | Project and data model design | Source, grain, dimensions, and fact table defined | In progress |
+| 2 | API extraction | Paginated extraction, retries, date filtering, and watermark handling | Partially implemented |
+| 3 | Local Parquet output | Extracted batches saved locally as Parquet | Planned |
+| 4 | Data transformation | Cleaning, validation, deduplication, and dimensional model built with Pandas | Planned |
+| 5 | GCS staging | Parquet files uploaded to Cloud Storage | Planned |
+| 6 | BigQuery loading | Staging, dimension, and fact tables loaded successfully | Planned |
+| 7 | Testing and data quality | Unit tests and pipeline checks pass | Planned |
+| 8 | Containerization | ETL image builds and runs locally | Planned |
+| 9 | GCP deployment | Cloud Run Job completes successfully | Planned |
+| 10 | Scheduling | Cloud Scheduler triggers the job successfully | Planned |
+
+## 16. Acceptance Criteria
+
+The project will be considered complete when:
+
+1. The pipeline extracts records from the NYC 311 API using paginated requests.
+2. Incremental extraction and watermark handling work without skipping records after a failed run.
+3. Extracted data is transformed with Python/Pandas and written to Parquet.
+4. Parquet files are staged in Google Cloud Storage.
+5. BigQuery contains the agreed dimensions and `fact_complaints` star schema.
+6. Fact rows have valid dimension foreign keys and one row per source complaint.
+7. Rerunning the pipeline does not create duplicate complaints.
+8. Automated tests and data quality checks pass.
+9. The Dockerized pipeline runs successfully as a Cloud Run Job.
+10. Cloud Scheduler can trigger the job without manual intervention.
+
+## 17. Out of Scope for the Initial Version
+
+- Streaming ingestion.
+- Apache Airflow / Cloud Composer.
+- Kubernetes / GKE or VM-based orchestration.
+- Full historical tracking of every complaint status change.
+- Slowly changing dimensions (SCD Type 2).
+- A separate facility dimension.
+- Dashboard development (may be considered later).
+"""
+
+output_path = "/mnt/data/PROJECT_SPEC.md"
+pypandoc.convert_text(
+    markdown,
+    "md",
+    format="md",
+    outputfile=output_path,
+    extra_args=["--standalone"],
+)
+print(f"Created: {output_path}")

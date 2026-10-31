@@ -62,6 +62,9 @@ def init_client():
   """
   Initialize the NYC Open Data Socrata client.
 
+  There is a retry logic(max of 5), request timeout(30 seconds), 
+  and exponential backoff in the GET request.
+
   Returns
   -------
   client : Socrata()
@@ -69,7 +72,9 @@ def init_client():
   """
   retry = Retry(
     total=5,
-    backoff_factor=1,
+    backoff_factor=2,
+    backoff_max=60,
+    backoff_jitter=0.5,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET"],
   )
