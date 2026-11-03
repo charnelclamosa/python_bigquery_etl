@@ -1,8 +1,10 @@
 import logging
+import pandas as pd
 from fastapi import FastAPI, APIRouter, status, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from src.logging_config import configure_logging
 from src.extract import extract_service_requests
+from src.transform import transform
 from src.utils import save_watermark
 
 configure_logging()
@@ -45,6 +47,20 @@ def read_service_requests():
   }
 
   return o
+
+@router.get("/etl/run")
+def run_pipeline():
+  """_summary_
+   Usage:
+      curl http://localhost:8080/api/etl/run
+  """
+  raw_df = pd.read_csv("data/service_requests.csv")
+  df = raw_df.copy()
+
+  logger.info("Running transformation")
+  df = transform(df)
+  df.to_csv("data/cleaned.csv", index=False)
+  
 
 app = FastAPI()
 app.include_router(router)

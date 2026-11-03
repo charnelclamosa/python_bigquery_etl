@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+import time
 from src.logging_config import configure_logging
 
 configure_logging()
@@ -71,8 +72,8 @@ def convert_data_types(df : pd.DataFrame) -> pd.DataFrame:
   """
   df = df.copy()
 
-  df[NUMERIC_COLS] = df[NUMERIC_COLS].appy(pd.to_numeric, errors="coerce")
-  df[DATETIME_COLS] = df[DATETIME_COLS].appy(
+  df[NUMERIC_COLS] = df[NUMERIC_COLS].apply(pd.to_numeric, errors="coerce")
+  df[DATETIME_COLS] = df[DATETIME_COLS].apply(
     pd.to_datetime, errors="coerce", utc=True)
 
   return df
@@ -136,6 +137,13 @@ def remove_duplicates(df, subset=None, keep="last") -> pd.DataFrame:
 
   return df.drop_duplicates(subset=subset, keep=keep,).reset_index(drop=True)
 
+# TODO: Function for normalizing uppercase strings in these columns:
+# [complaint_type, descriptor, incident_address, street_name, address_type, landmark, city, borough, park_borough]
+
+# TODO: Things to consider with current raw dataset:
+# - empty vallues in lat/lon
+# - many null values in facility_type col, has inconsistent data
+
 def transform(raw_df : pd.DataFrame) -> pd.DataFrame:
   """
   Clean and transform the extracted NYC 311 dataset.
@@ -154,10 +162,13 @@ def transform(raw_df : pd.DataFrame) -> pd.DataFrame:
     Transformed DataFrame ready for downstream data validation
     and dimensional modeling.
   """
+  logger.info("Running transformation process")
+  t0 = time.perf_counter()
   df = clean_strings(raw_df)
   df = convert_data_types(df)
   df = validate_coordinates(df)
   df = remove_duplicates(df, subset=["unique_key"], keep="last")
+  logger.info("Transformation process done, %.1fs", time.perf_counter() - t0)
 
   return df
 

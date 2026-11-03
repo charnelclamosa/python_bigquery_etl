@@ -7,6 +7,8 @@ from typing import Iterator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from sodapy import Socrata
 from src.logging_config import configure_logging
 from src.utils import fmt_ts, load_watermark, to_records
@@ -46,9 +48,6 @@ DATASET_COLS = [
 
   # dim_status
   "status",
-
-  # dim_resolution
-  "resolution_description",
 
   # dim_date
   "created_date",
@@ -195,6 +194,8 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   if dupes:
     logger.warning("Dropped %d duplicate rows by unique_key", dupes)
 
+  save_to_disk(df, "service_requests")
+
   records = to_records(df)
 
   new_wm = df["created_date"].max()
@@ -205,3 +206,13 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   )
 
   return records, new_wm
+
+def save_to_disk(df, filename):
+  """_summary_
+  """
+  logger.info("Saving df to disk as CSV, and Parquet files")
+  filename = f"data/{filename}"
+  df.to_csv(f"{filename}.csv", index=False)
+  table = pa.Table.from_pandas(df)
+  pq.write_table(table, f"{filename}")
+
