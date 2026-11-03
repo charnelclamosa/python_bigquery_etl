@@ -462,9 +462,9 @@ nyc-311-etl/
 
 | # | Milestone | Completion criteria | Status |
 |---|---|---|---|
-| 1 | Project and data model design | Source, grain, dimensions, and fact table defined | In progress |
-| 2 | API extraction | Paginated extraction, retries, date filtering, and watermark handling | Partially implemented |
-| 3 | Local Parquet output | Extracted batches saved locally as Parquet | Planned |
+| 1 | Project and data model design | Source, grain, dimensions, and fact table defined | Done |
+| 2 | API extraction | Paginated extraction, retries, date filtering, and watermark handling | Done |
+| 3 | Local Parquet output | Extracted batches saved locally as Parquet | In progress |
 | 4 | Data transformation | Cleaning, validation, deduplication, and dimensional model built with Pandas | Planned |
 | 5 | GCS staging | Parquet files uploaded to Cloud Storage | Planned |
 | 6 | BigQuery loading | Staging, dimension, and fact tables loaded successfully | Planned |

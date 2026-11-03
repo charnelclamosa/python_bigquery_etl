@@ -1,9 +1,11 @@
 @startuml
 title 311 Service Requests – Star Schema Data Model
+
 left to right direction
 skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 60
 hide circle
-
 
 entity "dim_agency" as dim_agency {
   * **agency_key** : INT <<PK>>
@@ -40,12 +42,6 @@ entity "dim_status" as dim_status {
   status : VARCHAR
 }
 
-entity "dim_resolution" as dim_resolution {
-  * **resolution_key** : INT <<PK>>
-  --
-  resolution_description : VARCHAR
-}
-
 entity "dim_date" as dim_date {
   * **date_key** : INT <<PK>>
   --
@@ -65,31 +61,24 @@ entity "fact_complaints" as fact_complaints {
   * complaint_type_key : INT <<FK>>
   * location_key : INT <<FK>>
   * status_key : INT <<FK>>
-  * resolution_key : INT <<FK>>
   * date_key : INT <<FK>>
   * resolution_date_key : INT <<FK>>
   complaint_count : INT
 }
 
-
-
 ' Relationships
-
 dim_agency ||--o{ fact_complaints
 dim_complaint_type ||--o{ fact_complaints
 dim_location ||--o{ fact_complaints
 dim_status ||--o{ fact_complaints
-dim_resolution ||--o{ fact_complaints
 dim_date ||--o{ fact_complaints
 
-' Layout hints
+' Layout positioning
+dim_agency -[hidden]right- dim_complaint_type
 dim_agency -[hidden]down- fact_complaints
+dim_complaint_type -[hidden]down- fact_complaints
+dim_status -[hidden]left- fact_complaints
 dim_date -[hidden]up- fact_complaints
-dim_complaint_type -[hidden]left- fact_complaints
-dim_location -[hidden]right- fact_complaints
-fact_complaints -[hidden]down- fact_complaints
-dim_status -[hidden]up- fact_complaints
-dim_resolution -[hidden]down- fact_complaints
-
+fact_complaints -[hidden]left- dim_location
 
 @enduml
