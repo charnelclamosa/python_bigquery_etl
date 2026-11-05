@@ -22,7 +22,6 @@ NUMERIC_COLS = [
   "latitude",
   "longitude",
 ]
-
 DATETIME_COLS = [
   "created_date",
   "resolution_action_updated_date",
@@ -74,10 +73,9 @@ def convert_data_types(df : pd.DataFrame) -> pd.DataFrame:
 
   df[NUMERIC_COLS] = df[NUMERIC_COLS].apply(pd.to_numeric, errors="coerce")
   df[DATETIME_COLS] = df[DATETIME_COLS].apply(
-    pd.to_datetime, errors="coerce", utc=True)
+    pd.to_datetime, errors="coerce")
 
   return df
-
 
 def validate_coordinates(df : pd.DataFrame) -> pd.DataFrame:
   """
@@ -137,12 +135,54 @@ def remove_duplicates(df, subset=None, keep="last") -> pd.DataFrame:
 
   return df.drop_duplicates(subset=subset, keep=keep,).reset_index(drop=True)
 
-# TODO: Function for normalizing uppercase strings in these columns:
-# [complaint_type, descriptor, incident_address, street_name, address_type, landmark, city, borough, park_borough]
+def strip_internal_spaces(df):
+  """
+  Remove internal multiple spaces between words.
 
-# TODO: Things to consider with current raw dataset:
-# - empty vallues in lat/lon
-# - many null values in facility_type col, has inconsistent data
+  Parameters
+  ----------
+  df : pandas.DataFrame
+    DataFrame containing records with multiple internal multiple spaces.
+
+  Returns
+  -------
+  pandas.DataFrame
+    A copy of the input DataFrame where the internal multiple spaces are removed.
+  """
+  df = df.copy()
+
+  for col in ['incident_address', 'street_name']:
+    df[col] = (
+      df[col]
+      .str.replace(r'\s+', ' ', regex=True)
+      .str.strip()
+  )
+
+  return df
+
+def str_to_title(df):
+  """
+  Parse the all caps texts to 'title' format.
+
+  Parameters
+  ----------
+  df : pandas.DataFrame
+    DataFrame containing records where there are records in all caps.
+
+  Returns
+  -------
+  pandas.DataFrame
+    A copy of the input DataFrame where the all caps strings are parsed to 'title' format.
+  """
+  df = df.copy()
+
+  cols = ['complaint_type', 'incident_address', 'street_name', 
+    'address_type', 'landmark', 'city', 'borough', 'park_borough']
+
+  for col in cols:
+    df[col] = df[col].str.title()
+
+  return df
 
 def transform(raw_df : pd.DataFrame) -> pd.DataFrame:
   """
@@ -164,10 +204,14 @@ def transform(raw_df : pd.DataFrame) -> pd.DataFrame:
   """
   logger.info("Running transformation process")
   t0 = time.perf_counter()
+
   df = clean_strings(raw_df)
   df = convert_data_types(df)
   df = validate_coordinates(df)
+  df = str_to_title(df)
+  df = strip_internal_spaces(df)
   df = remove_duplicates(df, subset=["unique_key"], keep="last")
+
   logger.info("Transformation process done, %.1fs", time.perf_counter() - t0)
 
   return df

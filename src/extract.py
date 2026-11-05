@@ -141,6 +141,8 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   rows by unique_key, and returns them with the watermark to save once
   the load succeeds. This function does not save the watermark itself.
 
+  TODO: Implement parallelism to make this faster.
+
   Parameters
   ----------
   start : str, optional
