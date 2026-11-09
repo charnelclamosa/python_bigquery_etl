@@ -2,8 +2,9 @@
 PROJECT_NAME 			?= python_etl
 CONTAINER_NAME    ?= $(PROJECT_NAME)
 API_PORT     			?= 8080
+MOUNT_DIR					:= -v "$(PWD):/app" $(PROJECT_NAME)
 
-.PHONY: all build run logs deploy bash stop
+.PHONY: all build run logs deploy test bash stop
 
 all: build run
 
@@ -14,7 +15,7 @@ run:
 	docker run -d --name $(CONTAINER_NAME) \
 		-p $(API_PORT):8080 \
 		-u "$(shell id -u):$(shell id -g)" \
-		-v "$(PWD):/app" $(PROJECT_NAME)
+		$(MOUNT_DIR)
 
 stop:
 	docker stop $(CONTAINER_NAME)
@@ -22,6 +23,9 @@ stop:
 
 logs:
 	docker logs -f $(CONTAINER_NAME)
+
+test:
+	docker run --rm $(MOUNT_DIR) pytest -v -s --disable-pytest-warnings tests/$(TEST)
 
 bash:
 	docker exec -it $(CONTAINER_NAME) bash
