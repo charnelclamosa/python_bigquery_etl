@@ -6,17 +6,6 @@ from src.logging_config import configure_logging
 configure_logging()
 logger = logging.getLogger(__name__)
 
-"""
-| Priority | Task | Status |
-|---|---|---|
-| 1 | Schema validation | Start here |
-| 2 | String cleaning | Done |
-| 3 | Data type conversion | Done |
-| 4 | Missing-value handling | Done |
-| 5 | Coordinate validation | Next |
-| 6 | Duplicate handling | After profiling |
-| 7 | Unit tests | Alongside each function |
-"""
 
 NUMERIC_COLS = [
   "latitude",
