@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.logging_config import configure_logging
 from src.extract import extract_service_requests
 from src.transform import transform
-from src.utils import save_watermark
+from src.util import save_watermark, df_to_csv, df_to_parquet
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def read_service_requests():
 
   service_requests, new_wm = extract_service_requests()
 
-  if not service_requests:
+  if service_requests.empty:
     logger.info("Nothing to load, watermark unchanged")
     return {"extracted": 0, "loaded": 0, "watermark": None}
 
@@ -46,7 +46,7 @@ def read_service_requests():
     "watermark": new_wm
   }
 
-  return o
+  return o, service_requests
 
 @router.get("/etl/run")
 def run_pipeline():
@@ -54,12 +54,13 @@ def run_pipeline():
    Usage:
       curl http://localhost:8080/api/etl/run
   """
-  raw_df = pd.read_csv("data/service_requests.csv")
+  _, raw_df = read_service_requests()
   df = raw_df.copy()
 
   logger.info("Running transformation")
   df = transform(df)
-  df.to_csv("data/cleaned.csv", index=False)
+  df_to_csv(df, "data/cleaned_service_requests")
+  df_to_parquet(df, "data/cleaned_service_requests")
   
 
 app = FastAPI()

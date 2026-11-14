@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from sodapy import Socrata
 from src.logging_config import configure_logging
-from src.utils import fmt_ts, load_watermark, to_records
+from src.util import fmt_ts, load_watermark, to_records, df_to_csv, df_to_parquet
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -196,7 +196,9 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   if dupes:
     logger.warning("Dropped %d duplicate rows by unique_key", dupes)
 
-  save_to_disk(df, "service_requests")
+  filename = "data/raw_service_requests"
+  df_to_csv(df, filename)
+  df_to_parquet(df, filename)
 
   records = to_records(df)
 
@@ -204,17 +206,7 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
 
   logger.info(
     "Extraction done: %d records, new watermark=%s, %.1fs",
-    len(records), new_wm, time.perf_counter() - t0,
+    len(df), new_wm, time.perf_counter() - t0,
   )
 
-  return records, new_wm
-
-def save_to_disk(df, filename):
-  """_summary_
-  """
-  logger.info("Saving df to disk as CSV, and Parquet files")
-  filename = f"data/{filename}"
-  df.to_csv(f"{filename}.csv", index=False)
-  table = pa.Table.from_pandas(df)
-  pq.write_table(table, f"{filename}")
-
+  return df, new_wm
