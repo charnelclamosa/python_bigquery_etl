@@ -201,7 +201,8 @@ def transform(raw_df : pd.DataFrame) -> pd.DataFrame:
   df = strip_internal_spaces(df)
   df = remove_duplicates(df, subset=["unique_key"], keep="last")
 
-  logger.info("Transformation process done, %.1fs", time.perf_counter() - t0)
+  logger.info("Transformation process done, runtime: %.1fs", 
+    time.perf_counter() - t0)
 
   return df
 

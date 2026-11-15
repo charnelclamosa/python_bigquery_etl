@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import pandas as pd
 import pyarrow as pa
@@ -34,6 +35,12 @@ def to_records(df: pd.DataFrame) -> list[dict]:
   DataFrame to list of dicts, with NaN/NaT converted to None.
   """
   return df.astype(object).where(df.notna(), None).to_dict("records")
+
+def get_str_date() -> str:
+  """
+  Return current date.
+  """
+  return datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d")
 
 def df_to_csv(df, filename):
   """

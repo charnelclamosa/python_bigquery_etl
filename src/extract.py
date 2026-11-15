@@ -205,7 +205,7 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   new_wm = df["created_date"].max()
 
   logger.info(
-    "Extraction done: %d records, new watermark=%s, %.1fs",
+    "Extraction process done: %d records, new watermark=%s, runtime: %.1fs",
     len(df), new_wm, time.perf_counter() - t0,
   )
 
