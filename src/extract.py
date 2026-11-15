@@ -3,15 +3,12 @@ import logging
 import time
 from contextlib import closing
 from datetime import datetime
-from typing import Iterator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from sodapy import Socrata
 from src.logging_config import configure_logging
-from src.util import fmt_ts, load_watermark, to_records, df_to_csv, df_to_parquet
+from src.util import fmt_ts, load_watermark
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -132,6 +129,32 @@ def _pages(client, start, end, page_size):
     
     offset += page_size
 
+def drop_duplicate_requests(df):
+  """
+  Remove duplicate service requests using their unique keys.
+
+  Parameters
+  ----------
+  df : pandas.DataFrame
+    Service requests containing a ``unique_key`` column.
+
+  Returns
+  -------
+  deduplicated_df : pandas.DataFrame
+    DataFrame with the first occurrence of each unique key retained.
+    The input DataFrame is not modified.
+  """
+  deduplicated_df = df.drop_duplicates(
+    subset="unique_key", keep="first")
+
+  duplicate_count = len(df) - len(deduplicated_df)
+
+  if duplicate_count:
+    logger.warning(
+      "Dropped %d duplicate rows by unique_key",
+      duplicate_count)
+
+  return deduplicated_df
 
 def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   """
@@ -190,23 +213,13 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
     logger.info("No new records in [%s, %s]", start, end)
     return [], start
 
-  # Later, create separate functions for data cleaning
-  df = pd.DataFrame.from_records(rows).drop_duplicates("unique_key")
-  dupes = len(rows) - len(df)
-  if dupes:
-    logger.warning("Dropped %d duplicate rows by unique_key", dupes)
-
-  filename = "data/raw_service_requests"
-  df_to_csv(df, filename)
-  df_to_parquet(df, filename)
-
-  records = to_records(df)
+  df = pd.DataFrame.from_records(rows)
+  df = drop_duplicate_requests(df)
 
   new_wm = df["created_date"].max()
 
   logger.info(
     "Extraction process done: %d records, new watermark=%s, runtime: %.1fs",
-    len(df), new_wm, time.perf_counter() - t0,
-  )
+    len(df), new_wm, time.perf_counter() - t0)
 
   return df, new_wm
