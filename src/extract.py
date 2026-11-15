@@ -8,6 +8,7 @@ from urllib3.util.retry import Retry
 import pandas as pd
 from sodapy import Socrata
 from src.logging_config import configure_logging
+from src.transform import remove_duplicates
 from src.util import fmt_ts, load_watermark
 
 configure_logging()
@@ -129,33 +130,6 @@ def _pages(client, start, end, page_size):
     
     offset += page_size
 
-def drop_duplicate_requests(df):
-  """
-  Remove duplicate service requests using their unique keys.
-
-  Parameters
-  ----------
-  df : pandas.DataFrame
-    Service requests containing a ``unique_key`` column.
-
-  Returns
-  -------
-  deduplicated_df : pandas.DataFrame
-    DataFrame with the first occurrence of each unique key retained.
-    The input DataFrame is not modified.
-  """
-  deduplicated_df = df.drop_duplicates(
-    subset="unique_key", keep="first")
-
-  duplicate_count = len(df) - len(deduplicated_df)
-
-  if duplicate_count:
-    logger.warning(
-      "Dropped %d duplicate rows by unique_key",
-      duplicate_count)
-
-  return deduplicated_df
-
 def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
   """
   Extract NYC 311 service requests created within a time window.
@@ -214,7 +188,7 @@ def extract_service_requests(start=None, end=None, page_size=PAGE_SIZE):
     return [], start
 
   df = pd.DataFrame.from_records(rows)
-  df = drop_duplicate_requests(df)
+  df = remove_duplicates(df, subset=["unique_key"], keep="last")
 
   new_wm = df["created_date"].max()
 

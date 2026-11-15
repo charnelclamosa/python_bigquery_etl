@@ -122,7 +122,7 @@ def remove_duplicates(df, subset=None, keep="last") -> pd.DataFrame:
   """
   df = df.copy()
 
-  return df.drop_duplicates(subset=subset, keep=keep,).reset_index(drop=True)
+  return df.drop_duplicates(subset=subset, keep=keep).reset_index(drop=True)
 
 def strip_internal_spaces(df):
   """
