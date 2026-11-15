@@ -65,7 +65,6 @@ def run_pipeline():
 
   if environment == "uat":
     bucket_name = os.getenv("GCS_BUCKET")
-
     if not bucket_name or not bucket_name.strip():
       raise ValueError("GCS_BUCKET is required in the cloud environment.")
 
@@ -82,6 +81,8 @@ def run_pipeline():
       "extracted": 0,
       "transformed": 0,
       "watermark": None,
+      "run date": run_date,
+      "run ID": run_id,
       "outputs": {},
     }
 
@@ -110,6 +111,7 @@ def run_pipeline():
     "extracted": len(raw_df),
     "transformed": len(cleaned_df),
     "watermark": new_wm,
+    "run date": run_date,
     "run ID": run_id,
     "outputs": {"raw": raw_path, "cleaned": cleaned_path}
   }
